@@ -40,20 +40,74 @@ app.post('/api/generate', async (req, res) => {
       **TASK:** Create a single, healthy recipe based on the user's goal and ingredients.
       **USER GOAL:** ${goal}
       **INGREDIENTS:** ${ingredients}
-      **OUTPUT FORMAT:** Respond with ONLY a valid JSON object. Do not include markdown, backticks, or any text before or after the JSON object.
-      **JSON STRUCTURE:** { "title": "String", "description": "String (one sentence)", "calories": Number, "protein": Number, "carbs": Number, "fat": Number, "steps": ["String", "String", ...] }
+      
+      **CRITICAL:** You must respond with ONLY a valid JSON object. No markdown, no explanations, no text before or after.
+      
+      **REQUIRED JSON STRUCTURE:**
+      {
+        "title": "Recipe Name",
+        "description": "One sentence description of the recipe",
+        "calories": 350,
+        "protein": 25,
+        "carbs": 30,
+        "fat": 15,
+        "steps": [
+          "Step 1 description",
+          "Step 2 description",
+          "Step 3 description"
+        ]
+      }
+      
+      **RULES:**
+      - Use only the exact field names shown above
+      - Ensure all numbers are integers (no decimals)
+      - Make sure the JSON is properly formatted with correct quotes and commas
+      - Do not include any text outside the JSON object
     `;
 
     console.log('⏳ Calling the Gemini AI...');
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
     console.log('✅ AI responded!');
+    console.log('📝 Raw AI response:', responseText);
 
-    const startIndex = responseText.indexOf('{');
-    const endIndex = responseText.lastIndexOf('}');
-    const jsonString = responseText.substring(startIndex, endIndex + 1);
+    // Try to extract JSON from the response
+    let jsonResponse;
+    try {
+      // First, try to parse the entire response
+      jsonResponse = JSON.parse(responseText);
+    } catch (parseError) {
+      console.log('⚠️ Direct JSON parse failed, trying to extract JSON...');
+      
+      // Clean the response text - remove markdown code blocks and trim
+      let cleanedText = responseText.trim();
+      
+      // Remove markdown code blocks if present
+      cleanedText = cleanedText.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+      
+      // Try to find JSON within the cleaned response
+      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          console.log('🔧 Extracted JSON string:', jsonMatch[0]);
+          jsonResponse = JSON.parse(jsonMatch[0]);
+        } catch (extractError) {
+          console.log('❌ JSON extraction failed:', extractError.message);
+          console.log('🔍 Failed JSON string:', jsonMatch[0]);
+          throw new Error('AI response could not be parsed as valid JSON');
+        }
+      } else {
+        throw new Error('No valid JSON found in AI response');
+      }
+    }
 
-    const jsonResponse = JSON.parse(jsonString);
+    // Validate the required fields
+    const requiredFields = ['title', 'description', 'calories', 'protein', 'carbs', 'fat', 'steps'];
+    const missingFields = requiredFields.filter(field => !(field in jsonResponse));
+    
+    if (missingFields.length > 0) {
+      throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+    }
 
     return res.status(200).json(jsonResponse);
 
